@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NET//BRAWL</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0b0e14;color:#d6deeb;font-family:monospace;overflow:hidden;display:flex;flex-direction:column;height:100vh}
+header{background:#131822;border-bottom:1px solid #263042;padding:6px 10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:space-between;font-size:11px;z-index:20}
+.brand{font-weight:bold;color:#00f0ff;font-size:13px}
+.grp{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+button,input,select{background:#090c10;color:#d6deeb;border:1px solid #263042;padding:3px 7px;font-family:inherit;font-size:11px;border-radius:3px}
+button{cursor:pointer}button:hover{border-color:#00f0ff;color:#00f0ff}
+.p1{border-color:#00ff9d;color:#00ff9d}.warn{border-color:#ffb84d;color:#ffb84d}.err{border-color:#ff3355;color:#ff3355}
+#main{position:relative;flex:1;display:flex;overflow:hidden}
+#dom-bg{position:absolute;inset:0;right:230px;opacity:.16;pointer-events:none;z-index:1}
+.dom-el{position:absolute;border:1px dashed #5c7099;background:rgba(30,42,66,.4);padding:4px 8px;font-size:10px;color:#8fa4cc;border-radius:3px}
+canvas{position:relative;z-index:5;flex:1;display:block}
+#log{width:230px;background:#0d1119;border-left:1px solid #263042;z-index:10;display:flex;flex-direction:column;font-size:10px}
+#log-h{padding:6px 8px;border-bottom:1px solid #263042;color:#00f0ff;font-weight:bold;display:flex;justify-content:space-between}
+#entries{flex:1;overflow-y:auto;padding:5px;display:flex;flex-direction:column;gap:4px}
+.item{padding:3px 5px;border-left:2px solid #00ff9d;background:rgba(255,255,255,.03)}
+.item.post{border-color:#ffb84d}.item.err{border-color:#ff3355}
+dialog{background:#131822;color:#d6deeb;border:1px solid #00f0ff;border-radius:5px;padding:12px;max-width:440px;width:90%;margin:auto;font-family:inherit;font-size:11px}
+dialog::backdrop{background:rgba(0,0,0,.75)}
+textarea{width:100%;height:56px;background:#07090d;color:#00ff9d;border:1px solid #263042;font-family:inherit;font-size:10px;padding:5px;margin:5px 0}
+.row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center}
+.cls-card{border:1px solid #263042;padding:6px;border-radius:4px;cursor:pointer;flex:1 1 45%}
+.cls-card:hover,.cls-card.active{border-color:#00ff9d;background:rgba(0,255,157,.07)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">NET//BRAWL</div>
+  <div class="grp">
+    <span id="status" class="p1">[LOCAL / BOT]</span>
+    <button class="p1" onclick="openModal('p2p-m')">P2P Invite</button>
+    <button onclick="openModal('cls-m')">Classes</button>
+    <button onclick="openModal('spr-m')">Sprite</button>
+    <button onclick="toggleSfx()" id="sfx-btn">SFX: ON</button>
+  </div>
+  <div class="grp">
+    <button class="p1" onclick="simNet('GET')">GET 200</button>
+    <button class="warn" onclick="simNet('POST')">POST</button>
+    <button class="err" onclick="simNet('ERR')">500 ERR</button>
+    <button onclick="toggleAuto()" id="auto-btn">Auto: ON</button>
+  </div>
+</header>
+
+<div id="main">
+  <div id="dom-bg"></div>
+  <canvas id="c"></canvas>
+  <aside id="log">
+    <div id="log-h"><span>LIVE TRAFFIC</span><span id="cnt">0</span></div>
+    <div id="entries"></div>
+  </aside>
+</div>
+
+<dialog id="p2p-m">
+  <b style="color:#00f0ff">Serverless P2P Invite (WebRTC)</b>
+  <p style="color:#8899b8;margin:4px 0">1. Host clicks <b>Create Invite URL</b> &amp; sends link.<br>2. Joiner opens link, copies <b>Answer URL</b> back to Host.<br>3. Host pastes Answer &amp; clicks <b>Connect</b>.</p>
+  <div class="row">
+    <button class="p1" onclick="makeOffer()">1. Create Invite URL</button>
+    <button onclick="finishAnswer()">3. Connect Answer</button>
+  </div>
+  <textarea id="sdp" placeholder="Invite or Answer URL appears here..."></textarea>
+  <div class="row" style="justify-content:space-between">
+    <button onclick="copySdp()">Copy URL</button>
+    <button onclick="closeModal('p2p-m')">Close</button>
+  </div>
+</dialog>
+
+<dialog id="cls-m">
+  <b style="color:#00f0ff">Select ASCII Fighter Class</b>
+  <div class="row" id="cls-list"></div>
+  <div class="row" style="justify-content:flex-end"><button onclick="closeModal('cls-m')">Done</button></div>
+</dialog>
+
+<dialog id="spr-m">
+  <b style="color:#00f0ff">Sprite Overlay (Optional)</b>
+  <div class="row"><input type="file" accept="image/*" onchange="loadFile(event)"></div>
+  <div class="row"><input id="spr-url" placeholder="https://...png" style="flex:1"><button class="p1" onclick="loadUrl()">Apply</button></div>
+  <div class="row"><button class="err" onclick="clearSpr()">Reset to ASCII</button><button onclick="closeModal('spr-m')">Done</button></div>
+</dialog>
+
+<script>
+const openModal = id => document.getElementById(id).showModal();
+const closeModal = id => document.getElementById(id).close();
+
+// --- SMOOTH WEB AUDIO SYNTHESIZER ---
+let actx = null, sfxOn = true;
+function toggleSfx() {
+  sfxOn = !sfxOn;
+  document.getElementById('sfx-btn').textContent = `SFX: ${sfxOn ? 'ON' : 'OFF'}`;
+}
+function tone(f1, f2, dur, type = 'triangle', vol = 0.08) {
+  if (!sfxOn) return;
+  if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+  if (actx.state === 'suspended') actx.resume();
+  const o = actx.createOscillator(), g = actx.createGain(), flt = actx.createBiquadFilter();
+  o.type = type; o.frequency.setValueAtTime(f1, actx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), actx.currentTime + dur);
+  flt.type = 'lowpass'; flt.frequency.value = 1400;
+  g.gain.setValueAtTime(vol, actx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
+  o.connect(flt); flt.connect(g); g.connect(actx.destination);
+  o.start(); o.stop(actx.currentTime + dur);
+}
+const sfx = {
+  jump: () => tone(190, 420, 0.14, 'sine', 0.09),
+  shoot: () => tone(520, 180, 0.11, 'triangle', 0.08),
+  spec: () => tone(300, 740, 0.22, 'sine', 0.1),
+  hit: () => tone(140, 55, 0.16, 'triangle', 0.12),
+  heal: () => tone(440, 880, 0.18, 'sine', 0.08),
+  warn: () => tone(160, 110, 0.25, 'sawtooth', 0.05)
+};
+
+// --- CLEAN NETWORK TRAFFIC INTERCEPTOR ---
+let reqCount = 0, autoNet = true;
+function logTraffic(evt) {
+  reqCount++;
+  document.getElementById('cnt').textContent = reqCount;
+  const el = document.createElement('div');
+  el.className = 'item ' + (evt.status >= 400 ? 'err' : evt.method !== 'GET' ? 'post' : '');
+  el.textContent = `[${evt.method} ${evt.status}] ${evt.path} -> ${evt.kind}`;
+  const box = document.getElementById('entries');
+  box.prepend(el);
+  if (box.children.length > 28) box.lastChild.remove();
+  spawnTrafficObj(evt);
+  if (role === 'host' && dc?.readyState === 'open') dc.send(JSON.stringify({ t: 'net', evt }));
+}
+
+const origFetch = window.fetch;
+window.fetch = async function(url, opts = {}) {
+  const m = (opts.method || 'GET').toUpperCase();
+  const u = String(url);
+  if (u.startsWith('virtual://')) {
+    const isErr = u.includes('500');
+    logTraffic({
+      method: m,
+      path: u.replace('virtual://', '/'),
+      status: isErr ? 500 : 200,
+      kind: isErr ? 'LASER' : m === 'POST' ? 'WAVE' : 'ORB'
+    });
+    return new Response('{}', { status: isErr ? 500 : 200 });
+  }
+  const res = await origFetch.apply(this, arguments);
+  logTraffic({ method: m, path: u.slice(0, 24), status: res.status, kind: res.status >= 400 ? 'LASER' : 'ORB' });
+  return res;
+};
+
+if ('PerformanceObserver' in window) {
+  try {
+    new PerformanceObserver(l => l.getEntries().forEach(e => {
+      if (['img', 'script', 'xmlhttprequest'].includes(e.initiatorType)) {
+        logTraffic({ method: 'GET', path: e.name.split('/').pop().slice(0, 20) || 'asset', status: 200, kind: 'BLOCK' });
+      }
+    })).observe({ type: 'resource', buffered: false });
+  } catch (e) {}
+}
+
+function simNet(type) {
+  if (type === 'GET') fetch('virtual://api/v1/feed');
+  else if (type === 'POST') fetch('virtual://api/v1/event', { method: 'POST' });
+  else fetch('virtual://api/v1/500-fault');
+}
+function toggleAuto() {
+  autoNet = !autoNet;
+  document.getElementById('auto-btn').textContent = `Auto: ${autoNet ? 'ON' : 'OFF'}`;
+}
+setInterval(() => {
+  if (!autoNet) return;
+  const r = Math.random();
+  simNet(r < 0.55 ? 'GET' : r < 0.85 ? 'POST' : 'ERR');
+}, 3400);
+
+// --- SERVERLESS WEBRTC P2P + URL HASH INVITES ---
+let pc = null, dc = null, role = 'local';
+function initPC(isHost) {
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  role = isHost ? 'host' : 'guest';
+  pc.onicecandidate = e => {
+    if (!e.candidate) {
+      const b64 = btoa(JSON.stringify(pc.localDescription));
+      const base = location.href.split('#')[0];
+      document.getElementById('sdp').value = `${base}#${isHost ? 'offer' : 'answer'}=${b64}`;
+    }
+  };
+  if (isHost) bindDC(pc.createDataChannel('nb'));
+  else pc.ondatachannel = e => bindDC(e.channel);
+}
+function bindDC(chan) {
+  dc = chan;
+  dc.onopen = () => {
+    document.getElementById('status').textContent = `[P2P: ${role.toUpperCase()}]`;
+    closeModal('p2p-m');
+  };
+  dc.onclose = () => { role = 'local'; document.getElementById('status').textContent = '[LOCAL / BOT]'; };
+  dc.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.t === 'st') Object.assign(role === 'host' ? P.p2 : P.p1, m.p);
+    else if (m.t === 'sh') projs.push(m.pr);
+    else if (m.t === 'net' && role === 'guest') spawnTrafficObj(m.evt);
+    else if (m.t === 'cls') applyClass(role === 'host' ? P.p2 : P.p1, m.c);
+  };
+}
+async function makeOffer() {
+  initPC(true);
+  await pc.setLocalDescription(await pc.createOffer());
+}
+async function finishAnswer() {
+  const raw = document.getElementById('sdp').value.trim();
+  const token = raw.includes('#answer=') ? raw.split('#answer=')[1] : raw;
+  if (!token || !pc) return;
+  await pc.setRemoteDescription(JSON.parse(atob(token)));
+}
+function copySdp() {
+  const el = document.getElementById('sdp');
+  el.select(); navigator.clipboard?.writeText(el.value);
+}
+window.addEventListener('load', async () => {
+  if (location.hash.startsWith('#offer=')) {
+    const offer = JSON.parse(atob(location.hash.slice(7)));
+    initPC(false);
+    await pc.setRemoteDescription(offer);
+    await pc.setLocalDescription(await pc.createAnswer());
+    openModal('p2p-m');
+  }
+});
+
+// --- FIGHTER CLASSES & ASCII ENGINE ---
+const CLASSES = {
+  runner: { name: 'NETRUNNER', hp: 100, spd: 4.5, jumps: 1, art: [[' [O] ', ' /|\\ ', ' / \\ '], [' [O] ', ' -|- ', ' / \\ ']], desc: 'Balanced + Firewall' },
+  tank:   { name: 'JUGGERNAUT', hp: 140, spd: 3.4, jumps: 1, art: [['[###]', '/| |\\', ' d b '], ['[###]', '-| |-', ' d b ']], desc: '140HP + 3-Way Spread' },
+  ninja:  { name: '0-DAY NINJA', hp: 85, spd: 5.5, jumps: 2, art: [[' (o) ', ' </| ', ' / > '], [' (o) ', '  |\\>', ' < \\ ']], desc: 'Double Jump + Blink' },
+  spider: { name: 'WEB SPIDER', hp: 95, spd: 4.8, jumps: 2, art: [[' /O\\ ', '/| |\\', '/   \\'], [' \\O/ ', '/| |\\', ' / \\ ']], desc: 'Double Jump + GET Heal' }
+};
+
+function makePlayer(id, x, col, dir) {
+  return { id, x, y: 80, vx: 0, vy: 0, w: 36, h: 46, hp: 100, maxHp: 100, en: 100, col, dir, grounded: false, jumpsLeft: 1, cd: 0, spCd: 0, cls: 'runner', spr: null };
+}
+const P = { p1: makePlayer('p1', 120, '#00ff9d', 1), p2: makePlayer('p2', 500, '#ff3e7f', -1) };
+
+function applyClass(p, key) {
+  const c = CLASSES[key] || CLASSES.runner;
+  p.cls = key; p.maxHp = c.hp; p.hp = c.hp; p.jumpsLeft = c.jumps;
+}
+
+const clsList = document.getElementById('cls-list');
+Object.entries(CLASSES).forEach(([k, c]) => {
+  const d = document.createElement('div');
+  d.className = 'cls-card' + (k === 'runner' ? ' active' : '');
+  d.innerHTML = `<b>${c.name}</b><br><span style="color:#8899b8">${c.desc}</span>`;
+  d.onclick = () => {
+    document.querySelectorAll('.cls-card').forEach(x => x.classList.remove('active'));
+    d.classList.add('active');
+    const me = role === 'guest' ? P.p2 : P.p1;
+    applyClass(me, k);
+    if (dc?.readyState === 'open') dc.send(JSON.stringify({ t: 'cls', c: k }));
+  };
+  clsList.appendChild(d);
+});
+
+function loadFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const img = new Image(); img.onload = () => (role === 'guest' ? P.p2 : P.p1).spr = img;
+  img.src = URL.createObjectURL(f);
+}
+function loadUrl() {
+  const u = document.getElementById('spr-url').value.trim(); if (!u) return;
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => (role === 'guest' ? P.p2 : P.p1).spr = img;
+  img.src = u;
+}
+function clearSpr() { (role === 'guest' ? P.p2 : P.p1).spr = null; }
+
+// --- 5. SYMMETRIC REACHABLE DOM ARENA & SMART AI ---
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let plats = [], projs = [], objs = [], parts = [];
+
+// Jump physics constants: vy = -11.2, g = 0.50 => max jump height = (11.2^2)/(2*0.5) = 125px
+// Every tier is spaced <= 105px vertically so 100% of platforms are reachable from below!
+function buildArena() {
+  canvas.width = canvas.parentElement.clientWidth - 230;
+  canvas.height = canvas.parentElement.clientHeight;
+  const W = canvas.width, H = canvas.height;
+  const bg = document.getElementById('dom-bg');
+  bg.innerHTML = '';
+  plats = [];
+
+  const layout = [
+    // Tier 1 (100px above floor) - Left & Right wing platforms
+    { x: W * 0.08, y: H - 124, w: W * 0.28, label: '<aside class="left-nav">' },
+    { x: W * 0.64, y: H - 124, w: W * 0.28, label: '<aside class="right-widget">' },
+    // Tier 2 (200px above floor) - Center bridge connecting both wings
+    { x: W * 0.34, y: H - 224, w: W * 0.32, label: '<article class="main-feed">' },
+    // Tier 3 (300px above floor) - Upper left & right ledges reachable from center bridge
+    { x: W * 0.12, y: H - 324, w: W * 0.24, label: '<nav class="sub-header">' },
+    { x: W * 0.64, y: H - 324, w: W * 0.24, label: '<div class="api-banner">' }
+  ];
+
+  layout.forEach(p => {
+    if (p.y > 45) {
+      plats.push({ x: p.x, y: p.y, w: p.w, h: 10, label: p.label, temp: 0 });
+      const el = document.createElement('div');
+      el.className = 'dom-el';
+      el.style.cssText = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:68px`;
+      el.textContent = p.label;
+      bg.appendChild(el);
+    }
+  });
+
+  // Solid ground floor
+  plats.push({ x: 0, y: H - 24, w: W, h: 24, label: '<body>', floor: true, temp: 0 });
+}
+window.addEventListener('resize', buildArena);
+
+function spawnTrafficObj(evt) {
+  const x = 60 + Math.random() * Math.max(100, canvas.width - 140);
+  if (evt.kind === 'LASER') {
+    sfx.warn();
+    objs.push({ kind: 'laser', x, y: 0, w: 18, h: canvas.height, life: 95 });
+  } else if (evt.kind === 'WAVE') {
+    const left = Math.random() > 0.5;
+    objs.push({ kind: 'wave', x: left ? 10 : canvas.width - 50, y: canvas.height - 62, vx: left ? 4.2 : -4.2, w: 42, h: 20, life: 240 });
+  } else if (evt.kind === 'BLOCK') {
+    plats.push({ x, y: canvas.height - 175, w: 110, h: 10, label: '<script>', temp: 360 });
+  } else {
+    objs.push({ kind: 'orb', x, y: canvas.height - 60 - Math.random() * 190, w: 22, h: 22, life: 360 });
+  }
+}
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+function shoot(p) {
+  if (p.cd > 0 || p.en < 14) return;
+  p.en -= 14; p.cd = 16; sfx.shoot();
+  const pr = { owner: p.id, x: p.dir === 1 ? p.x + p.w : p.x - 24, y: p.y + 16, vx: p.dir * 8.8, vy: 0, w: 24, h: 10, txt: p.dir === 1 ? '===>' : '<===', col: p.col, dmg: p.cls === 'tank' ? 16 : 11, life: 75 };
+  projs.push(pr);
+  if (dc?.readyState === 'open') dc.send(JSON.stringify({ t: 'sh', pr }));
+}
+
+function special(p) {
+  if (p.spCd > 0 || p.en < 40) return;
+  p.en -= 40; p.spCd = 110; sfx.spec();
+  if (p.cls === 'runner') {
+    plats.push({ x: Math.max(10, Math.min(canvas.width - 110, p.x + p.dir * 55)), y: p.y + p.h - 8, w: 100, h: 10, label: '<firewall>', temp: 300 });
+    p.hp = Math.min(p.maxHp, p.hp + 15);
+  } else if (p.cls === 'tank') {
+    [-1.6, 0, 1.6].forEach(vy => projs.push({ owner: p.id, x: p.x + 14, y: p.y + 14, vx: p.dir * 7.5, vy, w: 26, h: 12, txt: '[SYN]', col: p.col, dmg: 10, life: 65 }));
+  } else if (p.cls === 'ninja') {
+    p.x = Math.max(10, Math.min(canvas.width - p.w - 10, p.x + p.dir * 130));
+    projs.push({ owner: p.id, x: p.x, y: p.y + 20, vx: 0, vy: 0, w: 28, h: 14, txt: '<XSS>', col: '#ffb84d', dmg: 22, life: 240 });
+  } else {
+    simNet('GET');
+    [-2.5, 2.5].forEach(vx => projs.push({ owner: p.id, x: p.x + 12, y: p.y + 10, vx, vy: -3.5, w: 20, h: 12, txt: '/o\\', col: p.col, dmg: 12, life: 80 }));
+  }
+}
+
+// Smart Waypoint / Stuck-Free AI
+let aiDropTimer = 0, aiStuckTicks = 0, aiLastX = 0;
+function updatePlayer(p, isMe, isBot) {
+  const c = CLASSES[p.cls];
+  let move = 0, wantJump = false, wantDrop = false;
+
+  if (isMe) {
+    if (keys.KeyA || keys.ArrowLeft) move = -1;
+    if (keys.KeyD || keys.ArrowRight) move = 1;
+    if (keys.KeyW || keys.ArrowUp) { wantJump = true; keys.KeyW = keys.ArrowUp = false; }
+    if (keys.KeyS || keys.ArrowDown) wantDrop = true;
+    if (keys.Space || keys.KeyZ) shoot(p);
+    if (keys.KeyX || keys.ShiftLeft) special(p);
+  } else if (isBot) {
+    const foe = P.p1;
+    const dx = foe.x - p.x;
+    const dy = foe.y - p.y; // positive means foe is BELOW bot
+    p.dir = dx >= 0 ? 1 : -1;
+
+    // Detect if stuck against an edge or oscillating
+    if (Math.abs(p.x - aiLastX) < 0.4) aiStuckTicks++;
+    else aiStuckTicks = 0;
+    aiLastX = p.x;
+
+    if (aiStuckTicks > 45) {
+      // Unstick by reversing direction or dropping down
+      p.dir = p.x > canvas.width * 0.5 ? -1 : 1;
+      move = p.dir;
+      aiDropTimer = 18;
+      aiStuckTicks = 0;
+    } else if (dy > 45 && !p.grounded) {
+      wantDrop = true;
+    } else if (dy > 45 && p.grounded && p.y < canvas.height - 60) {
+      // Foe is below: drop through one-way platform cleanly
+      aiDropTimer = 16;
+      move = Math.abs(dx) > 30 ? p.dir : (p.x > canvas.width * 0.5 ? -1 : 1);
+    } else if (dy < -45 && p.grounded) {
+      // Foe is above: align under a reachable ledge and jump
+      move = Math.abs(dx) > 40 ? p.dir : 0;
+      if (Math.random() < 0.08) wantJump = true;
+    } else {
+      // Same elevation: keep optimal combat spacing (150px)
+      if (Math.abs(dx) > 190) move = p.dir;
+      else if (Math.abs(dx) < 110) move = -p.dir;
+    }
+
+    if (aiDropTimer > 0) { wantDrop = true; aiDropTimer--; }
+    if (Math.abs(dy) < 42 && Math.abs(dx) < 360 && Math.random() < 0.05) shoot(p);
+    if (p.en >= 50 && Math.abs(dx) < 240 && Math.random() < 0.015) special(p);
+  }
+
+  if (p.cd > 0) p.cd--;
+  if (p.spCd > 0) p.spCd--;
+  p.en = Math.min(100, p.en + 0.32);
+
+  if (isMe || isBot) {
+    if (move !== 0) { p.vx = move * c.spd; p.dir = move; }
+    else p.vx *= 0.75;
+
+    if (wantJump && p.jumpsLeft > 0) {
+      p.vy = -11.2; p.grounded = false; p.jumpsLeft--; sfx.jump();
+    }
+
+    p.vy += 0.50;
+    p.x = Math.max(4, Math.min(canvas.width - p.w - 4, p.x + p.vx));
+    p.y += p.vy;
+
+    p.grounded = false;
+    for (const pl of plats) {
+      if (wantDrop && !pl.floor) continue;
+      if (p.vy >= 0 && p.x + p.w > pl.x && p.x < pl.x + pl.w && p.y + p.h >= pl.y && p.y + p.h - p.vy <= pl.y + 14) {
+        p.y = pl.y - p.h; p.vy = 0; p.grounded = true; p.jumpsLeft = c.jumps;
+      }
+    }
+  }
+}
+
+const hit = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+function burst(x, y, col) {
+  for (let i = 0; i < 7; i++) parts.push({ x, y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, col, life: 22, ch: '*+01#'[i % 5] });
+}
+
+let tick = 0;
+function loop() {
+  tick++;
+  const me = role === 'guest' ? P.p2 : P.p1;
+  const foe = role === 'guest' ? P.p1 : P.p2;
+
+  updatePlayer(me, true, false);
+  updatePlayer(foe, false, role === 'local');
+
+  if (dc?.readyState === 'open' && tick % 2 === 0) {
+    dc.send(JSON.stringify({ t: 'st', p: { x: me.x, y: me.y, dir: me.dir, hp: me.hp, en: me.en } }));
+  }
+
+  // Temp platforms countdown
+  for (let i = plats.length - 1; i >= 0; i--) {
+    if (plats[i].temp > 0 && --plats[i].temp === 0) plats.splice(i, 1);
+  }
+
+  // Projectiles
+  for (let i = projs.length - 1; i >= 0; i--) {
+    const pr = projs[i];
+    pr.x += pr.vx; pr.y += pr.vy; pr.life--;
+    const tgt = pr.owner === 'p1' ? P.p2 : P.p1;
+    if (hit(pr, tgt)) {
+      tgt.hp = Math.max(0, tgt.hp - pr.dmg);
+      sfx.hit(); burst(tgt.x + 18, tgt.y + 22, pr.col);
+      projs.splice(i, 1); continue;
+    }
+    if (pr.life <= 0 || pr.x < -30 || pr.x > canvas.width + 30) projs.splice(i, 1);
+  }
+
+  // Traffic hazards & pickups
+  for (let i = objs.length - 1; i >= 0; i--) {
+    const o = objs[i]; o.life--;
+    if (o.vx) o.x += o.vx;
+    [P.p1, P.p2].forEach(p => {
+      if (!hit(o, p)) return;
+      if (o.kind === 'orb') { p.hp = Math.min(p.maxHp, p.hp + 15); p.en = Math.min(100, p.en + 30); sfx.heal(); burst(o.x, o.y, '#00ff9d'); o.life = 0; }
+      else if (o.kind === 'wave') { p.hp = Math.max(0, p.hp - 8); p.vy = -6; sfx.hit(); burst(p.x + 18, p.y + 20, '#ffb84d'); o.life = 0; }
+      else if (o.kind === 'laser' && o.life < 45 && tick % 10 === 0) { p.hp = Math.max(0, p.hp - 5); sfx.hit(); burst(p.x + 18, p.y + 20, '#ff3355'); }
+    });
+    if (o.life <= 0) objs.splice(i, 1);
+  }
+
+  // KO Reset
+  if (P.p1.hp <= 0 || P.p2.hp <= 0) {
+    [P.p1, P.p2].forEach((p, idx) => { p.hp = p.maxHp; p.x = idx ? canvas.width - 160 : 120; p.y = 60; p.vy = 0; });
+  }
+
+  // Render
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  plats.forEach(pl => {
+    ctx.fillStyle = pl.temp ? 'rgba(255,184,77,.2)' : 'rgba(0,240,255,.15)';
+    ctx.fillRect(pl.x, pl.y, pl.w, pl.h);
+    ctx.strokeStyle = pl.temp ? '#ffb84d' : '#00f0ff';
+    ctx.strokeRect(pl.x, pl.y, pl.w, pl.h);
+    ctx.fillStyle = '#6e8bb8'; ctx.font = '10px monospace';
+    ctx.fillText(pl.label, pl.x + 4, pl.y - 3);
+  });
+
+  objs.forEach(o => {
+    if (o.kind === 'orb') {
+      ctx.strokeStyle = '#00ff9d'; ctx.strokeRect(o.x, o.y, o.w, o.h);
+      ctx.fillStyle = '#00ff9d'; ctx.font = 'bold 10px monospace'; ctx.fillText('+200', o.x - 2, o.y + 14);
+    } else if (o.kind === 'wave') {
+      ctx.fillStyle = '#ffb84d'; ctx.font = 'bold 12px monospace'; ctx.fillText('>>POST>>', o.x, o.y + 14);
+    } else if (o.kind === 'laser') {
+      ctx.fillStyle = o.life >= 45 ? 'rgba(255,51,85,.12)' : 'rgba(255,51,85,.45)';
+      ctx.fillRect(o.x, 0, o.w, canvas.height);
+      ctx.fillStyle = '#ff3355'; ctx.font = 'bold 10px monospace';
+      ctx.fillText(o.life >= 45 ? 'WARN 500' : '!! 500 !!', o.x - 14, 38);
+    }
+  });
+
+  projs.forEach(pr => { ctx.fillStyle = pr.col; ctx.font = 'bold 12px monospace'; ctx.fillText(pr.txt, pr.x, pr.y + 9); });
+
+  [P.p1, P.p2].forEach(p => {
+    if (p.spr) {
+      ctx.save(); ctx.translate(p.x + p.w / 2, p.y + p.h / 2);
+      if (p.dir === -1) ctx.scale(-1, 1);
+      ctx.drawImage(p.spr, -22, -28, 44, 56); ctx.restore();
+    } else {
+      const frames = CLASSES[p.cls].art;
+      const lines = frames[Math.floor(tick / 12) % frames.length];
+      ctx.fillStyle = p.col; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+      lines.forEach((ln, i) => ctx.fillText(p.dir === -1 ? ln.split('').reverse().join('') : ln, p.x + p.w / 2, p.y + 14 + i * 14));
+      ctx.textAlign = 'left';
+    }
+    ctx.fillStyle = '#090c10'; ctx.fillRect(p.x - 4, p.y - 14, 44, 5);
+    ctx.fillStyle = p.col; ctx.fillRect(p.x - 4, p.y - 14, 44 * (p.hp / p.maxHp), 5);
+  });
+
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const pt = parts[i]; pt.x += pt.vx; pt.y += pt.vy;
+    ctx.fillStyle = pt.col; ctx.font = '11px monospace'; ctx.fillText(pt.ch, pt.x, pt.y);
+    if (--pt.life <= 0) parts.splice(i, 1);
+  }
+
+  ctx.fillStyle = 'rgba(214,222,235,.65)'; ctx.font = '11px monospace';
+  ctx.fillText('A/D: Move | W: Jump | S: Drop Through | Space/Z: Attack | X/Shift: Special', 12, 20);
+  requestAnimationFrame(loop);
+}
+
+buildArena();
+loop();
+</script>
+</body>
+</html>
